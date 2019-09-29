@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+		<title>Sleep Recorder</title>
+		<style type="text/css">
+			
+		</style>
+	</head>
+	<body>
+		<audio id="player" controls></audio>
+		<a id="download">Download</a>
+		<!-- 
+			FIRST OPTION: 
+				- FILE INPUT with CAPTURE attribute 
+		<input id="microphone" type="file" accept="audio/*" capture>
+		<script>
+			var m = document.querySelector("#microphone");
+			m.onchange = function(event){
+				var p = document.querySelector("#player");
+				p.src = URL.createObjectURL(event.target.files[0]);
+			};
+		</script>
+		-->
+		
+		<!-- 
+			SECOND OPTION: 
+				- navigator.audio
+		-->
+		<script>
+		
+function createAudioMeter(audioContext,clipLevel,averaging,clipLag) {
+	var processor = audioContext.createScriptProcessor(512);
+	processor.onaudioprocess = volumeAudioProcess;
+	processor.clipping = false;
+	processor.lastClip = 0;
+	processor.volume = 0;
+	processor.clipLevel = clipLevel || 0.98;
+	processor.averaging = averaging || 0.95;
+	processor.clipLag = clipLag || 750;
+
+	// this will have no effect, since we don't copy the input to the output,
+	// but works around a current Chrome bug.
+	processor.connect(audioContext.destination);
+	processor.checkClipping =
+		function(){
+			if (!this.clipping)
+				return false;
+			if ((this.lastClip + this.clipLag) < window.performance.now())
+				this.clipping = false;
+			return this.clipping;
+		};
+
+	processor.shutdown =
+		function(){
+			this.disconnect();
+			this.onaudioprocess = null;
+		};
+
+	return processor;
+}
+
+function volumeAudioProcess( event ) {
+	var buf = event.inputBuffer.getChannelData(0);
+    var bufLength = buf.length;
+	var sum = 0;
+    var x;
+
+	// Do a root-mean-square on the samples: sum up the squares...
+    for (var i=0; i<bufLength; i++) {
+    	x = buf[i];
+    	if (Math.abs(x)>=this.clipLevel) {
+    		this.clipping = true;
+    		this.lastClip = window.performance.now();
+    	}
+    	sum += x * x;
+    }
+
+    // ... then take the square root of the sum.
+    var rms =  Math.sqrt(sum / bufLength);
+
+    // Now smooth this out with the averaging factor applied
+    // to the previous sample - take the max here because we
+    // want "fast attack, slow release."
+    this.volume = Math.max(rms, this.volume*this.averaging);
+}
+
+
+
+
+			var meter, rafID;
+			var maxVolume = 0;
+			var p = document.querySelector("#player");
+			if ("mediaDevices" in navigator) {
+				console.log("MediaDevices supported by your browser!");
+				navigator.mediaDevices
+					.enumerateDevices()
+					.then(function(devices){
+						devices = devices.filter(function(device){return device.kind == "audioinput"});
+						console.log("All (audio) devices: ",devices);
+						if (devices.length > 0){
+							navigator.mediaDevices
+								.getUserMedia({
+									audio: {
+										deviceId: devices[0].deviceId,
+										mandatory: {
+											"googEchoCancellation": "false",
+											"googAutoGainControl": "false",
+											"googNoiseSuppression": "false",
+											"googHighpassFilter": "false"
+										},
+										optional: []
+									}
+								})
+								.then(function(stream){
+									console.log("Stream: ",stream);
+									var context = new AudioContext();
+									var source = context.createMediaStreamSource(stream);
+									meter = createAudioMeter(context);
+									var mediaRecorder = new MediaRecorder(stream,{mimeType: "audio/webm"});
+									const recordedChunks = [];
+									mediaRecorder.addEventListener("dataavailable",function(event){
+										if (event.data.size > 0){
+											console.log(event.data);
+											recordedChunks.push(event.data);
+										}
+									});
+									mediaRecorder.addEventListener("stop",function(){
+										var downloadLink = document.querySelector("#download");
+										downloadLink.href = URL.createObjectURL(new Blob(recordedChunks));
+										downloadLink.download = "sound.wav";
+									})
+									mediaRecorder.start();
+									setTimeout(function(){
+										mediaRecorder.stop();
+										stream.getTracks().forEach(track => track.stop());
+										context.close();
+									},10*1000);
+									source.connect(meter);
+									onLevelChange();
+									
+									if (window.URL) p.srcObject = stream;
+									else player.src = stream;
+								})
+								.catch(function(err){
+									console.log("getUserMedia Error: ",err.name);
+									console.log(err);
+								});
+						}
+						else console.log("No (audio) devices found!");
+					});
+			}
+			else console.log("MediaDevices is NOT supported by your browser!");
+			
+			function onLevelChange(time){
+				//console.log("volume: "+meter.volume);
+				if (meter.volume > maxVolume) {
+					maxVolume = meter.volume;
+					console.log(maxVolume);
+				}
+				rafID = window.requestAnimationFrame(function(args){
+					onLevelChange(undefined,undefined,0,undefined);
+				});
+			}
+		</script>
+		<script>
+
+		</script>
+	</body>
+</html>
